@@ -1,10 +1,10 @@
 length = len(data)
-sorted_data = sorted(data)
+sortedData = sorted(data)
 
 if length % 2 == 0: 
-  median = (sorted_data[length//2] + sorted_data[length//2 - 1])/2
+  median = (sortedData[length//2] + sortedData[length//2 - 1])/2
 else:
-  median = sorted_data[length//2]
+  median = sortedData[length//2]
 
  
 print(f"The median of your data is {median}")

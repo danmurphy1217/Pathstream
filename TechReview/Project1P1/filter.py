@@ -1,5 +1,5 @@
-pos_data = []
+posData = []
 
 for i in data:
     if i >= 0:
-        pos_data.append(i)
+        posData.append(i)
