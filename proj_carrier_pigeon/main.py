@@ -3,6 +3,7 @@ import os
 import time
 import argparse
 import json
+import datetime
 
 from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
@@ -17,8 +18,61 @@ Need Two Parameters:
 2. Project Name (to find li for and to get due date from airtable)
 """
 
+# TODO: read in date from Airtable based on course + project name, use that date to set the due date in Pathstream admin.
+
 driver = webdriver.Chrome()
 wait = WebDriverWait(driver, 10)
+
+
+def convert_to_linked_name(cell_id: str, project_name):
+    headers = {
+        "Authorization": os.environ.get("AIRTABLE_BEARER_KEY"),
+        "Accept": "application/json",
+    }
+
+    response = requests.get(
+        f"https://api.airtable.com/v0/appLKd7EW0aXuhcTb/Grid%20View/{cell_id}", headers=headers)
+
+    response.raise_for_status()
+
+    return response.json()['fields']['Course Version']
+
+
+def get_due_date_from_airtable(course_name: str, project_name: str):
+    """
+    Get the correct due date for a project with the provided `course_name` and `project_name`
+
+    :param course_name -> ``str``: the name of the course (ID)
+    :param project_name -> ``str``: the name of the project
+    """
+    headers = {
+        "Authorization": os.environ.get("AIRTABLE_BEARER_KEY"),
+        "Accept": "application/json",
+    }
+
+    response = requests.get(
+        f"https://api.airtable.com/v0/appLKd7EW0aXuhcTb/Projects?fields%5B%5D=Course&fields%5B%5D=Project%20Name&fields%5B%5D=Due%20Date&fields%5B%5D=Start%20Date", headers=headers)
+
+    response.raise_for_status()
+
+    jsonified_res = response.json()
+    records = jsonified_res['records']
+    for record in records:
+        course_reference = record['fields']['Course']
+        project_reference = record['fields']['Project Name']
+
+        linked_course_id = convert_to_linked_name(
+            course_reference[0], project_name)
+
+        print("START")
+        print(linked_course_id)
+        print(course_name)
+        print(project_reference)
+        print(project_name)
+        print("\n")
+
+        if linked_course_id == course_name and project_reference == project_name:
+            return datetime.datetime.strptime(record['fields']['Start Date'], "%Y-%m-%d") + datetime.timedelta(weeks=1)
 
 
 def get_page_with_driver(url: str):
@@ -83,7 +137,7 @@ def find_and_click_correct_child(project_name: str):
     tab_for_correct_assignment_name.click()
 
 
-def set_and_save_due_date():
+def set_and_save_due_date(due_date_and_time: datetime.datetime):
     set_due_date_btn = driver.find_element_by_xpath(
         "//button[contains(.,'Set due date')]")
     set_due_date_btn.click()  # enter set due date modal / popup
@@ -92,7 +146,7 @@ def set_and_save_due_date():
     input_elem.click()  # click input tag
     time.sleep(1)
     # input custom date (this needs to be pulled from airtable later)
-    input_elem.send_keys("2021-12-17 12:30:10")
+    input_elem.send_keys(due_date_and_time.strftime("%Y-%m-%d 00:00:00"))
     time.sleep(1)
     submit_due_date_btn = driver.find_element_by_xpath(
         "//button[contains(.,'Ok')]")  # submit the date, click button to submit save
@@ -128,12 +182,13 @@ if __name__ == "__main__":
     cohort_id = args.cohort_id
     jsonified_project_info = json.loads(args.project_info)
 
-    print(cohort_id, jsonified_project_info)
+    due_date_and_time = get_due_date_from_airtable(
+        jsonified_project_info['course_name'], jsonified_project_info['project_name'])
 
     driver = get_page_with_driver("https://qa2.pathstream.com/coach/dashboard")
     authenticate()
     find_cohort_button_for_correct_course(cohort_id)
     click_assignments_tab()
     find_and_click_correct_child(jsonified_project_info['project_name'])
-    set_and_save_due_date()
+    set_and_save_due_date(due_date_and_time)
     driver.close()
