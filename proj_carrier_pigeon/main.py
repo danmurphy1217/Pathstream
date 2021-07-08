@@ -31,11 +31,11 @@ def convert_to_linked_name(cell_id: str, project_name):
     }
 
     response = requests.get(
-        f"https://api.airtable.com/v0/appLKd7EW0aXuhcTb/Grid%20View/{cell_id}", headers=headers)
+        f"https://api.airtable.com/v0/appBRLEUdTlfhgkUZ/Courses/{cell_id}", headers=headers)
 
     response.raise_for_status()
 
-    return response.json()['fields']['Course Version']
+    return response.json()['fields']['Course Name']
 
 
 def get_due_date_from_airtable(course_name: str, project_name: str):
@@ -51,7 +51,7 @@ def get_due_date_from_airtable(course_name: str, project_name: str):
     }
 
     response = requests.get(
-        f"https://api.airtable.com/v0/appLKd7EW0aXuhcTb/Projects?fields%5B%5D=Course&fields%5B%5D=Project%20Name&fields%5B%5D=Due%20Date&fields%5B%5D=Start%20Date", headers=headers)
+        f"https://api.airtable.com/v0/appBRLEUdTlfhgkUZ/Projects?fields%5B%5D=Course&fields%5B%5D=Project%20Name&fields%5B%5D=Due%20Date&fields%5B%5D=Start%20Date", headers=headers)
 
     response.raise_for_status()
 
@@ -60,19 +60,22 @@ def get_due_date_from_airtable(course_name: str, project_name: str):
     for record in records:
         course_reference = record['fields']['Course']
         project_reference = record['fields']['Project Name']
-
-        linked_course_id = convert_to_linked_name(
+        due_date = record['fields']['Due Date']
+        
+        linked_course_name = convert_to_linked_name(
             course_reference[0], project_name)
 
         print("START")
-        print(linked_course_id)
-        print(course_name)
+        print(linked_course_name)
+        print(course_name[0])
         print(project_reference)
         print(project_name)
         print("\n")
 
-        if linked_course_id == course_name and project_reference == project_name:
-            return datetime.datetime.strptime(record['fields']['Start Date'], "%Y-%m-%d") + datetime.timedelta(weeks=1)
+        if linked_course_name == course_name[0] and project_reference == project_name:
+            print("Here")
+            print(due_date, record['fields']['Start Date'], datetime.datetime.strptime(record['fields']['Start Date'], "%Y-%m-%d") + datetime.timedelta(weeks=due_date))
+            return datetime.datetime.strptime(record['fields']['Start Date'], "%Y-%m-%d") + datetime.timedelta(weeks=due_date)
 
 
 def get_page_with_driver(url: str):
@@ -95,18 +98,21 @@ def authenticate():
     password_input.send_keys(Keys.RETURN)
 
 
-def find_cohort_button_for_correct_course(cohort_id: str):
+def find_cohort_button_for_correct_course(cohort_name: str):
     """
     Using the Chrome webdriver instance and cohort id, find the correct cohort button
 
-    :param cohort_id -> ``str``: the ID of the cohort.
+    :param cohort_name -> ``str``: the name of the cohort.
     """
-    view_cohort_button_for_correct_course = wait.until(ec.visibility_of_element_located(
-        (By.XPATH,
-         f"//a[contains(@href, '/coach/dashboard/cohorts/{cohort_id}')]")
-    ))
+    time.sleep(5)
+    div_for_correct_course = driver.find_elements_by_xpath("//div[@class='cohort-group']")
 
-    view_cohort_button_for_correct_course.click()
+    parent_div_with_button = [(i, elem) for i, elem in enumerate(div_for_correct_course) if elem.text.split('\n')[0] == cohort_name][0]
+
+    all_buttons = parent_div_with_button[1].find_elements_by_xpath("//span[contains(.,'View cohort')]")
+    button = all_buttons[parent_div_with_button[0]]
+
+    button.click()
 
 
 def click_assignments_tab():
@@ -157,37 +163,55 @@ def set_and_save_due_date(due_date_and_time: datetime.datetime):
     save_due_date_btn.click()
 
 
+def get_brightspace_and_project_name_from_airtable():
+    headers = {
+        "Authorization": os.environ.get("AIRTABLE_BEARER_KEY"),
+        "Accept": "application/json",
+    }
+
+    course_sections_response = requests.get(
+        f"https://api.airtable.com/v0/appBRLEUdTlfhgkUZ/Course%20Sections?view=Course%20Section%20Creation%20Script", headers=headers)
+
+    projects_response = requests.get(
+        f"https://api.airtable.com/v0/appBRLEUdTlfhgkUZ/Projects", headers=headers)
+
+    course_sections_response.raise_for_status()
+    projects_response.raise_for_status()
+
+    jsonified_response = course_sections_response.json()['records']
+    tuple_of_names_and_projects = [(row['fields']['Brightspace Name'], row['fields']
+                                    ['Projects (from Course Version) (from Cohort Course Name)']) for row in jsonified_response]
+    projects_ids = [row[1] for row in tuple_of_names_and_projects]
+    flattened_proj_ids = [proj_id for proj_ids in projects_ids for proj_id in proj_ids]
+    print(flattened_proj_ids)
+
+    jsonified_projects_res = projects_response.json()['records']
+    # return [row['fields']['Project Name'] for row in jsonified_projects_res if row['id'] in projects_ids]
+    return [row['fields'] for row in jsonified_projects_res if row['id'] in flattened_proj_ids]
+
+
 if __name__ == "__main__":
-    base_parser = argparse.ArgumentParser(
-        description="Simple command-line tool for running the script with the needed inputs",
-        formatter_class=argparse.RawTextHelpFormatter
-    )
+    all_brightspace_and_project_names = get_brightspace_and_project_name_from_airtable()
+    print(all_brightspace_and_project_names)
+    first_brightspace_name = get_brightspace_and_project_name_from_airtable()[0]
+    print(first_brightspace_name)
 
-    base_parser.add_argument(
-        "--cohort_id",
-        type=str,
-        nargs="?",
-        help="The ID for the cohort."
-    )
+    args = {
+        "project_info": {
+            "course_name": first_brightspace_name.get('Course Name (from Course)', False),
+            "project_name": first_brightspace_name.get('Project Name', False)
+        }
+    }
+    print(args)
 
-    base_parser.add_argument(
-        "--project_info",
-        type=str,
-        nargs="?",
-        help="The Course and Project Name"
-    )
-
-    args = base_parser.parse_args()
-
-    cohort_id = args.cohort_id
-    jsonified_project_info = json.loads(args.project_info)
+    jsonified_project_info = json.loads(json.dumps(args["project_info"]))
 
     due_date_and_time = get_due_date_from_airtable(
         jsonified_project_info['course_name'], jsonified_project_info['project_name'])
 
     driver = get_page_with_driver("https://qa2.pathstream.com/coach/dashboard")
     authenticate()
-    find_cohort_button_for_correct_course(cohort_id)
+    find_cohort_button_for_correct_course(jsonified_project_info['course_name'])
     click_assignments_tab()
     find_and_click_correct_child(jsonified_project_info['project_name'])
     set_and_save_due_date(due_date_and_time)
